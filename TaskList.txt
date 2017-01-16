@@ -1,0 +1,3 @@
+[] make play area
+[] put background on play area
+[] make background scroll
