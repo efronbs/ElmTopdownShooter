@@ -1,3 +1,7 @@
+[X] make ship appear on screen
+[X] add left and right arrow keys
+[] add up and down arrow keys
+
 [] make play area
 [] put background on play area
 [] make background scroll
