@@ -1,7 +1,36 @@
+Player Ship:
 [X] make ship appear on screen
 [X] add left and right arrow keys
-[] add up and down arrow keys
+[X] add up and down arrow keys
 
-[] make play area
+[X] put light background on playing field
+
+Bullets:
+[X] make straight bullet
+[X] add bullet that moves 
+[] make 4 more different bullet patterns
+    [X] triple shot
+    [X] boomerang
+    [X] angle shot
+    [X] bomb
+        [X] move set distance and stop
+        [X] explode into other bullets 
+
+Playing Field:
+[] add walls of the arena
+[] ship collides with walls and won't move off screen
 [] put background on play area
 [] make background scroll
+
+Enemy Ships:
+[] add 1 enemy ship that is stationary but appears
+[] make enemy ship shoot bullets
+[] make that enemy ship move
+[] make enemy ships scroll into playing area
+[] all enemy ships appear onto screen, move in their pattern, shoot bullets, and disapear off screen 
+
+Collisions:
+[] player ship can never move too far off screen
+[] 
+
+

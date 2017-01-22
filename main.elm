@@ -7,7 +7,6 @@ import Time exposing (Time)
 import Keyboard
 
 -- MAIN 
-
 main : Program Never Model Msg
 main =
     Html.program
@@ -18,6 +17,7 @@ main =
         }
 
 -- MODEL
+type BUpdater = BUpdater (Float,Float) (Float ->List BUpdater)
 
 type alias Ship = {
     backX : Float 
@@ -35,6 +35,11 @@ type alias Model =
         player : Ship
         , keypress : (HorizontalButtonState, VerticalButtonState)
         , oldTime : Maybe Time
+        , straightBullet : List BUpdater 
+        , tripleBullet : List BUpdater
+        , boomerangBullet : List BUpdater
+        , angleBullet : List BUpdater
+        , bombBullet : List BUpdater
     }
 
 init : (Model, Cmd Msg)
@@ -42,17 +47,22 @@ init =
     (
         {
             player = {
-                backX = 250
-                , backY = 350
+                backX = 800
+                , backY = 600
                 , backR = 25
-                , frontX = 250
-                , frontY = 325
+                , frontX = 800
+                , frontY = 575
                 , frontR = 15
                 , velocityX = 500
                 , velocityY = 500
             }
             , keypress = (HNone, VNone)
             , oldTime = Nothing 
+            , straightBullet = lineBulletUpdater 50 500 0 200 0
+            , tripleBullet = tripleBulletCreate 150 500
+            , boomerangBullet = boomerangBullerUpdater 250 500 -1 0
+            , angleBullet = angleShotCreate 350 500
+            , bombBullet = bombBulletUpdater 450 500 300 0
         }
         , Cmd.none
     )
@@ -67,6 +77,68 @@ type VerticalButtonState
 type Msg = 
     Key HorizontalButtonState VerticalButtonState | Tick Time
 
+
+lineBulletUpdater : Float -> Float -> Float -> Float -> Float -> List BUpdater
+lineBulletUpdater x y vx vy delta =
+    let newY = y - vy * (delta / 1000)
+        newX = x + vx * (delta / 1000)
+    in [BUpdater (newX, newY) (lineBulletUpdater newX newY vx vy)]
+
+tripleBulletCreate : Float -> Float -> List BUpdater
+tripleBulletCreate x topY  =
+    let midY = topY + 20
+        botY = topY + 40
+    in List.concat(
+        [
+            lineBulletUpdater x topY 0 200 0 
+            , lineBulletUpdater x midY 0 200 0
+            , lineBulletUpdater x botY 0 200 0
+        ])
+
+boomerangBullerUpdater : Float -> Float -> Float -> Float -> List BUpdater
+boomerangBullerUpdater x y multiplier delta =
+    let
+        newMultiplier = if y <= 0 then multiplier * -1  else multiplier
+        newX = x 
+        newY = y + newMultiplier * 200 * (delta / 1000)
+    in 
+        [BUpdater (newX, newY) (boomerangBullerUpdater newX newY newMultiplier )]
+
+angleShotCreate : Float -> Float -> List BUpdater
+angleShotCreate x y =
+    let centerXMultiplier = 0
+        rightXMultiplier = 100
+        leftXMultiplier = -100 
+    in List.concat(
+    [
+        lineBulletUpdater x y centerXMultiplier 200 0 
+        , lineBulletUpdater x y rightXMultiplier 200 0
+        , lineBulletUpdater x y leftXMultiplier 200 0
+    ])
+
+bombBulletUpdater : Float -> Float -> Float -> Float -> List BUpdater
+bombBulletUpdater x y goalY delta = 
+    if y > goalY then
+        let newY = y - 200 * (delta / 1000)
+            newX = x
+        in [BUpdater (newX, newY) (bombBulletUpdater newX newY goalY)]
+    else
+        List.concat([
+                lineBulletUpdater x y 0 200 0 -- straight up
+                , lineBulletUpdater x y 200 200 0 -- right up angle
+                , lineBulletUpdater x y -200 200 0 -- left up angle
+                , lineBulletUpdater x y 200 0 0 -- right horizontal
+                , lineBulletUpdater x y -200 0 0 -- left horizontal
+                , lineBulletUpdater x y 200 -200 0 -- right down angle
+                , lineBulletUpdater x y -200 -200 0 -- left down angle
+                , lineBulletUpdater x y 0 -200 0 -- straight down
+            ])
+
+updateBulletPos: Float -> BUpdater -> List BUpdater
+updateBulletPos delta updater =
+    case updater of
+        BUpdater _ func -> func delta
+
 update : Msg -> Model -> (Model, Cmd Msg)
 update msg model = 
     case msg of
@@ -76,7 +148,13 @@ update msg model =
             case model.oldTime of 
                 Just oldTime ->
                     ({model | oldTime = Just newTime
-                        , player = (updatePlayerLocation model (newTime - oldTime) )}, Cmd.none)
+                        , player = (updatePlayerLocation model (newTime - oldTime) )
+                        , straightBullet = List.concat (List.map (\updater -> updateBulletPos (newTime - oldTime) updater) model.straightBullet)
+                        , tripleBullet = List.concat (List.map (\updater -> updateBulletPos (newTime - oldTime) updater) model.tripleBullet)
+                        , boomerangBullet = List.concat (List.map (\updater -> updateBulletPos (newTime - oldTime) updater) model.boomerangBullet)
+                        , angleBullet = List.concat (List.map (\updater -> updateBulletPos (newTime - oldTime) updater) model.angleBullet)
+                        , bombBullet = List.concat (List.map (\updater -> updateBulletPos (newTime - oldTime) updater) model.bombBullet)
+                        }, Cmd.none)
                 Nothing -> 
                     ({model | oldTime = Just newTime}, Cmd.none)
 
@@ -110,9 +188,29 @@ view model =
        -- Html.hr [] []
         svg 
             [viewBox "0 0 900 650", width "900px"] 
-            (ship model.player)
-       -- , Html.hr [] [] 
+            (List.concat
+                [
+                    [
+                        -- background
+                        rect [x "0", y "0", width "900px", height "650px", fill "rgb(248,199,255)"] []
+                        -- straight bullet
+                    ]
+                    , (ship model.player)
+                    , List.map (\updater -> drawBullet updater) model.straightBullet
+                    , List.map (\updater -> drawBullet updater) model.tripleBullet
+                    , List.map (\updater -> drawBullet updater) model.boomerangBullet
+                    , List.map (\updater -> drawBullet updater) model.angleBullet
+                    , List.map (\updater -> drawBullet updater) model.bombBullet
+                ]
+            )
+       -- , Html.hr [] []
     ]
+
+
+drawBullet: BUpdater -> Svg Msg
+drawBullet updater =
+ case updater of
+   BUpdater (x,y) _ -> circle [ cx (toString x), cy (toString y), r "5", fill "#0B79CE" ] []
 
 ship : Ship -> List (Svg Msg)
 ship s =  
