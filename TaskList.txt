@@ -8,7 +8,7 @@ Player Ship:
 Bullets:
 [X] make straight bullet
 [X] add bullet that moves 
-[] make 4 more different bullet patterns
+[X] make 4 more different bullet patterns
     [X] triple shot
     [X] boomerang
     [X] angle shot
@@ -16,11 +16,15 @@ Bullets:
         [X] move set distance and stop
         [X] explode into other bullets 
 
+Player Interaction & powerups:
+[X] pressing spacebar spawns a bullet at the ship's location
+[X] pressing some keys scrolls through bullet types
+
 Playing Field:
-[] add walls of the arena
-[] ship collides with walls and won't move off screen
+[] ship collides with board edges and won't move off too far screen
 [] put background on play area
 [] make background scroll
+[] bullets that are too far offscreen die
 
 Enemy Ships:
 [] add 1 enemy ship that is stationary but appears

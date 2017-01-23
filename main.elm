@@ -5,6 +5,7 @@ import Svg exposing (..)
 import Svg.Attributes exposing (..)
 import Time exposing (Time)
 import Keyboard
+import Debug
 
 -- MAIN 
 main : Program Never Model Msg
@@ -28,6 +29,7 @@ type alias Ship = {
     , frontR : Float
     , velocityX : Float
     , velocityY : Float
+    , bulletType : BulletType
 }
 
 type alias Model =
@@ -35,11 +37,7 @@ type alias Model =
         player : Ship
         , keypress : (HorizontalButtonState, VerticalButtonState)
         , oldTime : Maybe Time
-        , straightBullet : List BUpdater 
-        , tripleBullet : List BUpdater
-        , boomerangBullet : List BUpdater
-        , angleBullet : List BUpdater
-        , bombBullet : List BUpdater
+        , bullets : List BUpdater
     }
 
 init : (Model, Cmd Msg)
@@ -55,17 +53,12 @@ init =
                 , frontR = 15
                 , velocityX = 500
                 , velocityY = 500
+                , bulletType = LineBullet
             }
             , keypress = (HNone, VNone)
             , oldTime = Nothing 
-            , straightBullet = lineBulletUpdater 50 500 0 200 0
-            , tripleBullet = tripleBulletCreate 150 500
-            , boomerangBullet = boomerangBullerUpdater 250 500 -1 0
-            , angleBullet = angleShotCreate 350 500
-            , bombBullet = bombBulletUpdater 450 500 300 0
-        }
-        , Cmd.none
-    )
+            , bullets = []
+        }, Cmd.none )
 
 -- UPDATE
 type HorizontalButtonState
@@ -74,8 +67,11 @@ type HorizontalButtonState
 type VerticalButtonState
     = Up | Down | VBoth | VNone
 
+type BulletType
+    = LineBullet | TripleShot | Boomerang | AngleShot | Bomb
+
 type Msg = 
-    Key HorizontalButtonState VerticalButtonState | Tick Time
+    None | Key HorizontalButtonState VerticalButtonState | Tick Time | FireBullet | SetBullet BulletType
 
 
 lineBulletUpdater : Float -> Float -> Float -> Float -> Float -> List BUpdater
@@ -95,14 +91,14 @@ tripleBulletCreate x topY  =
             , lineBulletUpdater x botY 0 200 0
         ])
 
-boomerangBullerUpdater : Float -> Float -> Float -> Float -> List BUpdater
-boomerangBullerUpdater x y multiplier delta =
+boomerangBulletUpdater : Float -> Float -> Float -> Float -> List BUpdater
+boomerangBulletUpdater x y multiplier delta =
     let
         newMultiplier = if y <= 0 then multiplier * -1  else multiplier
         newX = x 
         newY = y + newMultiplier * 200 * (delta / 1000)
     in 
-        [BUpdater (newX, newY) (boomerangBullerUpdater newX newY newMultiplier )]
+        [BUpdater (newX, newY) (boomerangBulletUpdater newX newY newMultiplier )]
 
 angleShotCreate : Float -> Float -> List BUpdater
 angleShotCreate x y =
@@ -139,24 +135,52 @@ updateBulletPos delta updater =
     case updater of
         BUpdater _ func -> func delta
 
+playerFireBullet : Model -> Model
+playerFireBullet model = 
+    let bulletStartY = (model.player.frontY + 3 - model.player.frontR)
+        bulletStartX = model.player.backX
+        newBulletUpdater = 
+            case model.player.bulletType of
+                LineBullet -> lineBulletUpdater bulletStartX bulletStartY 0 200 0
+                TripleShot -> tripleBulletCreate bulletStartX bulletStartY
+                Boomerang -> boomerangBulletUpdater bulletStartX bulletStartY -1 0
+                AngleShot -> angleShotCreate bulletStartX bulletStartY
+                Bomb -> bombBulletUpdater bulletStartX bulletStartY (bulletStartY - 200) 0
+    in 
+        {model | bullets = List.append model.bullets newBulletUpdater} 
+
 update : Msg -> Model -> (Model, Cmd Msg)
 update msg model = 
     case msg of
         Key h v -> 
             ({model | keypress = (h, v)} , Cmd.none)
+
         Tick newTime ->
-            case model.oldTime of 
-                Just oldTime ->
-                    ({model | oldTime = Just newTime
-                        , player = (updatePlayerLocation model (newTime - oldTime) )
-                        , straightBullet = List.concat (List.map (\updater -> updateBulletPos (newTime - oldTime) updater) model.straightBullet)
-                        , tripleBullet = List.concat (List.map (\updater -> updateBulletPos (newTime - oldTime) updater) model.tripleBullet)
-                        , boomerangBullet = List.concat (List.map (\updater -> updateBulletPos (newTime - oldTime) updater) model.boomerangBullet)
-                        , angleBullet = List.concat (List.map (\updater -> updateBulletPos (newTime - oldTime) updater) model.angleBullet)
-                        , bombBullet = List.concat (List.map (\updater -> updateBulletPos (newTime - oldTime) updater) model.bombBullet)
-                        }, Cmd.none)
-                Nothing -> 
-                    ({model | oldTime = Just newTime}, Cmd.none)
+            (updateBoardState newTime model, Cmd.none)
+
+        FireBullet -> (playerFireBullet model , Cmd.none)
+        
+        SetBullet btype -> 
+            let newPlayer = 
+                let player = model.player
+                in {player | bulletType = btype}
+            in ({model | player = newPlayer}, Cmd.none)       
+
+        None -> (model, Cmd.none)
+
+updateBoardState : Time -> Model -> Model
+updateBoardState newTime model =
+    case model.oldTime of 
+        Just oldTime ->
+            let newBullets = List.concat (List.map (\updater -> updateBulletPos (newTime - oldTime) updater) model.bullets)
+                newPlayer = (updatePlayerLocation model (newTime - oldTime) )
+            in
+                {model | oldTime = Just newTime
+                    , player = newPlayer
+                    , bullets = newBullets
+                    }
+        Nothing -> 
+            {model | oldTime = Just newTime}                                       
 
 updatePlayerLocation : Model -> Float -> Ship
 updatePlayerLocation model timeDelta =
@@ -196,11 +220,7 @@ view model =
                         -- straight bullet
                     ]
                     , (ship model.player)
-                    , List.map (\updater -> drawBullet updater) model.straightBullet
-                    , List.map (\updater -> drawBullet updater) model.tripleBullet
-                    , List.map (\updater -> drawBullet updater) model.boomerangBullet
-                    , List.map (\updater -> drawBullet updater) model.angleBullet
-                    , List.map (\updater -> drawBullet updater) model.bombBullet
+                    , List.map (\updater -> drawBullet updater) model.bullets
                 ]
             )
        -- , Html.hr [] []
@@ -259,6 +279,16 @@ handleUp state =
         -- Default
         (_ , (currentHorizontal, currentVertical)) -> Key currentHorizontal currentVertical
 
+bulletOperation : Keyboard.KeyCode -> Model -> Msg
+bulletOperation key model =
+    case key of
+        32 -> FireBullet
+        113 -> SetBullet LineBullet --q for line
+        119 -> SetBullet TripleShot --w for triple
+        101 -> SetBullet Boomerang  --e for boomerang
+        114 -> SetBullet AngleShot  --r for angle
+        116 -> SetBullet Bomb       --t for bomb
+        _ -> None
 
 -- on my browser keyboard presses does not work properly
 -- so I'm using ups and downs
@@ -268,5 +298,6 @@ subscriptions model =
     [
       Keyboard.downs (\k -> handleDown (k, model.keypress))
       , Keyboard.ups (\k -> handleUp (k, model.keypress))
+      , Keyboard.presses (\k -> bulletOperation k model)
       , Time.every (Time.millisecond * 40) Tick
      ]
