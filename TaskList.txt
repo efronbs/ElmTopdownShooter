@@ -21,9 +21,9 @@ Player Interaction & powerups:
 [X] pressing some keys scrolls through bullet types
 
 Playing Field:
-[] ship collides with board edges and won't move off too far screen
-[] put background on play area
-[] make background scroll
+[X] ship collides with board edges and won't move off too far screen
+[X] put background on play area
+[X] make background scroll
 [] bullets that are too far offscreen die
 
 Enemy Ships:

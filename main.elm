@@ -4,6 +4,7 @@ import Html exposing(Html)
 import Svg exposing (..)
 import Svg.Attributes exposing (..)
 import Time exposing (Time)
+import Random
 import Keyboard
 import Debug
 
@@ -27,6 +28,8 @@ type alias Ship = {
     , frontX : Float
     , frontY : Float
     , frontR : Float
+    , baseVelocityX : Float
+    , baseVelocityY : Float
     , velocityX : Float
     , velocityY : Float
     , bulletType : BulletType
@@ -34,7 +37,8 @@ type alias Ship = {
 
 type alias Model =
     {
-        player : Ship
+        background : List (Float, Float, Float) --list of stars in the form x, y, radius
+        , player : Ship
         , keypress : (HorizontalButtonState, VerticalButtonState)
         , oldTime : Maybe Time
         , bullets : List BUpdater
@@ -44,15 +48,18 @@ init : (Model, Cmd Msg)
 init = 
     (
         {
-            player = {
+            background = [(200, 200, 2)]
+            , player = {
                 backX = 800
                 , backY = 600
                 , backR = 25
                 , frontX = 800
                 , frontY = 575
                 , frontR = 15
-                , velocityX = 500
-                , velocityY = 500
+                , baseVelocityX = 500
+                , baseVelocityY = 500
+                , velocityX = 0
+                , velocityY = 0
                 , bulletType = LineBullet
             }
             , keypress = (HNone, VNone)
@@ -71,7 +78,7 @@ type BulletType
     = LineBullet | TripleShot | Boomerang | AngleShot | Bomb
 
 type Msg = 
-    None | Key HorizontalButtonState VerticalButtonState | Tick Time | FireBullet | SetBullet BulletType
+    None | Key HorizontalButtonState VerticalButtonState | Tick Time | FireBullet | SetBullet BulletType | StarCreate (Float, Float)
 
 
 lineBulletUpdater : Float -> Float -> Float -> Float -> Float -> List BUpdater
@@ -149,14 +156,23 @@ playerFireBullet model =
     in 
         {model | bullets = List.append model.bullets newBulletUpdater} 
 
+starPairGenerator : Random.Generator (Float, Float)
+starPairGenerator =
+    Random.pair (Random.float 0 2) (Random.float 0 900)
+
+createNewStar : (Float, Float) -> Model -> List (Float, Float, Float)
+createNewStar result model = 
+    let (radius, location) = result
+    in [(location, 5, radius)]
+
 update : Msg -> Model -> (Model, Cmd Msg)
 update msg model = 
     case msg of
         Key h v -> 
-            ({model | keypress = (h, v)} , Cmd.none)
+            ({model | keypress = (h, v)},  Cmd.none)
 
         Tick newTime ->
-            (updateBoardState newTime model, Cmd.none)
+            (updateBoardState newTime model, (Random.generate StarCreate starPairGenerator))
 
         FireBullet -> (playerFireBullet model , Cmd.none)
         
@@ -166,44 +182,67 @@ update msg model =
                 in {player | bulletType = btype}
             in ({model | player = newPlayer}, Cmd.none)       
 
+        StarCreate result ->
+            ({model | background = List.append model.background (createNewStar result model)}, Cmd.none)
+        
         None -> (model, Cmd.none)
+
+garbageCollectStars : Model -> Model
+garbageCollectStars model = 
 
 updateBoardState : Time -> Model -> Model
 updateBoardState newTime model =
     case model.oldTime of 
         Just oldTime ->
             let newBullets = List.concat (List.map (\updater -> updateBulletPos (newTime - oldTime) updater) model.bullets)
-                newPlayer = (updatePlayerLocation model (newTime - oldTime) )
+                newPlayer = (updatePlayerLocation (updatePlayerVelocity model) (newTime - oldTime) )
+                newBackground = List.map (\(x, y, rad) -> (x, y + 10, rad)) model.background
             in
                 {model | oldTime = Just newTime
                     , player = newPlayer
                     , bullets = newBullets
+                    , background = newBackground
                     }
         Nothing -> 
-            {model | oldTime = Just newTime}                                       
+            {model | oldTime = Just newTime}
+                                       
+wallCheck : (HorizontalButtonState, VerticalButtonState) -> Model -> (Float, Float)
+wallCheck (h, v) model =
+    -- still fall off right side - no idea why
+    let newBaseXVel = if (Debug.log "current x: " model.player.backX >= 900 && Debug.log "direction " h == Right) || (model.player.backX <= 0 && h == Left) then 0 else model.player.baseVelocityX
+        newBaseYVel = if (model.player.frontY <= 0 && v == Up) || (model.player.backY >= 650 && v == Down) then 0 else model.player.baseVelocityY
+    in (newBaseXVel, newBaseYVel)
+
+updatePlayerVelocity : Model -> Model
+updatePlayerVelocity model = 
+    let newPlayer = 
+        let player = model.player
+            (newBaseXVel, newBaseYVel) = wallCheck model.keypress model
+            (h ,v) = model.keypress
+            horizVel = 
+                case h of 
+                    Left -> -1 * newBaseXVel
+                    Right -> newBaseYVel
+                    HBoth -> 0
+                    HNone -> 0
+            vertVel = 
+                case v of 
+                    Up -> -1 * newBaseYVel
+                    Down -> newBaseYVel
+                    VBoth -> 0
+                    VNone -> 0
+        in {player | velocityX = horizVel, velocityY=vertVel}
+    in {model | player = newPlayer}
 
 updatePlayerLocation : Model -> Float -> Ship
 updatePlayerLocation model timeDelta =
     let
         player = model.player
-        (horizontalKeypress, verticallKeypress) = model.keypress
-        horizVel = 
-            case horizontalKeypress of 
-                Left -> -1 * player.velocityX
-                Right -> player.velocityX
-                HBoth -> 0
-                HNone -> 0
-        vertVel = 
-            case verticallKeypress of 
-                Up -> -1 * player.velocityY
-                Down -> player.velocityY
-                VBoth -> 0
-                VNone -> 0
     in
-        {player | frontX = player.frontX + (timeDelta / 1000) * horizVel
-            , backX = player.backX + (timeDelta / 1000) * horizVel
-            , frontY = player.frontY + (timeDelta / 1000) * vertVel
-            , backY = player.backY + (timeDelta / 1000) * vertVel}
+        {player | frontX = player.frontX + (timeDelta / 1000) * player.velocityX
+            , backX = player.backX + (timeDelta / 1000) * player.velocityX
+            , frontY = player.frontY + (timeDelta / 1000) * player.velocityY
+            , backY = player.backY + (timeDelta / 1000) * player.velocityY}
 
 -- VIEW
 view : Model -> Html Msg
@@ -214,17 +253,18 @@ view model =
             [viewBox "0 0 900 650", width "900px"] 
             (List.concat
                 [
-                    [
-                        -- background
-                        rect [x "0", y "0", width "900px", height "650px", fill "rgb(248,199,255)"] []
-                        -- straight bullet
-                    ]
+                    drawBackground model
                     , (ship model.player)
                     , List.map (\updater -> drawBullet updater) model.bullets
                 ]
             )
        -- , Html.hr [] []
     ]
+
+drawBackground : Model -> List (Svg Msg)
+drawBackground model = 
+        (rect [x "0", y "0", width "900px", height "650px", fill "black"] [])
+            :: List.map (\(x, y, radius) -> circle [ cx (toString x), cy (toString y), r (toString radius), fill "white"] []) model.background
 
 
 drawBullet: BUpdater -> Svg Msg
