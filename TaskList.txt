@@ -28,11 +28,11 @@ Playing Field:
 
 Enemy Ships:
 [X] add 1 enemy ship that is stationary but appears
-[] Shooting the enemy ship causes it to disapear
-[] touching the enemy ship causes your ship to disapear
-[] make that enemy ship move
-[] make enemy ships scroll into playing area
-[] all enemy ships appear onto screen, move in their pattern, shoot bullets, and disapear off screen 
+[X] Shooting the enemy ship causes it to disapear
+[X] touching the enemy ship causes your ship to disapear
+[X] make that enemy ship move
+[X] make enemy ships scroll into playing area
+[X] all enemy ships appear onto screen, move in their pattern, shoot bullets, and disapear off screen 
 
 QOL
 [] enemy direction

@@ -21,7 +21,7 @@ main =
 -- MODEL
 type BUpdater = BUpdater (Float,Float) (Float -> List BUpdater)
 
-type EnemyUpdater = EnemyUpdater (Float, Float) (Float -> List EnemyUpdater) 
+type EnemyUpdater = EnemyUpdater (Float, Float, String) (Float -> List EnemyUpdater) 
 
 type alias Ship = {
     backX : Float 
@@ -68,7 +68,7 @@ init =
             , keypress = (HNone, VNone)
             , oldTime = Nothing 
             , bullets = []
-            , enemies = stationaryEnemyUpdater 450 200 0
+            , enemies = []
         }, Cmd.none )
 
 -- UPDATE
@@ -82,14 +82,55 @@ type BulletType
     = LineBullet | TripleShot | Boomerang | AngleShot | Bomb
 
 type Msg = 
-    None | Key HorizontalButtonState VerticalButtonState | Tick Time | FireBullet | SetBullet BulletType | StarCreate (Float, Float)
+    None | Key HorizontalButtonState VerticalButtonState | Tick Time | FireBullet | SetBullet BulletType | StarCreate (Float, Float) 
+    | EnemyCreate (Int, Float, Float, Float)
 
 distance : (Float, Float) -> (Float, Float) -> Float
 distance (x1, y1) (x2, y2) =
     sqrt((y2 - y1)^2 + (x2 - x1)^2 )
 
-stationaryEnemyUpdater : Float -> Float -> Float -> List EnemyUpdater
-stationaryEnemyUpdater x y delta = [ EnemyUpdater (x, y) (stationaryEnemyUpdater x y) ]
+lineEnemyUpdater : Float -> Float -> Float -> Float -> Float -> List EnemyUpdater
+lineEnemyUpdater x y vx vy delta = 
+    let newX = x + vx * (delta / 1000)
+        newY = y - vy * (delta / 1000)
+    in [EnemyUpdater (newX, newY, "red") (lineEnemyUpdater newX newY vx vy)]
+
+zigzagEnemyUpdater : Float -> Float -> Float -> Float -> Float -> List EnemyUpdater
+zigzagEnemyUpdater x y vx vy delta = 
+    let newXVel = if x <= 0 || x >= 900 then -1 * vx else vx
+        newX = x + newXVel * (delta / 1000)
+        newY = y - vy * (delta / 1000)
+    in [EnemyUpdater (newX, newY, "blue") (zigzagEnemyUpdater newX newY newXVel vy)]
+
+sineEnemyCreate : Float -> Float -> List EnemyUpdater
+sineEnemyCreate x y = 
+    sineEnemyUpdate x y x y 20 0
+
+sineEnemyUpdate : Float -> Float -> Float -> Float -> Int -> Float -> List EnemyUpdater
+sineEnemyUpdate x y initialX initialY limit delta = 
+    let newX = x + delta / 10
+        newY = initialY + 100*sin (deltaX/20)
+        deltaX = newX - initialX
+        behindShip = if limit <= 0 then [] else [EnemyUpdater (newX, newY, "purple") (sineEnemyUpdate x y initialX initialY (limit - 1))]
+    in  if limit <= 0 then [EnemyUpdater (newX, newY, "purple") (sineEnemyUpdate newX newY initialX initialY 0)]
+        else 
+            [
+                EnemyUpdater (newX, newY, "purple") (sineEnemyUpdate newX newY initialX initialY 0)
+                , EnemyUpdater (newX, newY, "purple") (sineEnemyUpdate x y initialX initialY (limit - 1))
+            ]
+
+rushEnemyCreate : Float -> Float -> List EnemyUpdater
+rushEnemyCreate x y =
+    rushEnemyUpdate x y (y + 200) 0
+
+rushEnemyUpdate : Float -> Float -> Float -> Float -> List EnemyUpdater
+rushEnemyUpdate x y limit delta =
+    if y <= limit then 
+        [EnemyUpdater (x, y + 20, "yellow") (rushEnemyUpdate x (y + 20) limit)]
+    else
+        let xVel = if x > 450 then -600 else 600 
+            yVel = -1200
+        in [EnemyUpdater (x, y, "yellow") (lineEnemyUpdater x y xVel yVel)]
 
 lineBulletUpdater : Float -> Float -> Float -> Float -> Float -> List BUpdater
 lineBulletUpdater x y vx vy delta =
@@ -180,6 +221,36 @@ createNewStar result model =
     let (radius, location) = result
     in [(location, 5, radius)]
 
+enemyPairGenerator : Random.Generator (Int, Float, Float, Float)
+enemyPairGenerator =
+     Random.map4 (,,,) (Random.int 0 100) (Random.float 0 1) (Random.float 0 900) (Random.float 0 10)
+
+createNewEnemy : (Int, Float, Float, Float) -> List EnemyUpdater
+createNewEnemy (shipToSpawn, exists, xStart, xVel) =
+    let newShip =
+        if shipToSpawn < 60 then
+            let x = xStart
+                y = 0
+                newXVel = if xStart >= 450 then -30 * xVel else 30 * xVel
+            in lineEnemyUpdater x y newXVel -700 0
+        else if shipToSpawn < 80 then 
+            let x = xStart
+                y = 0
+                newXVel = if xStart >= 450 then -500 else 500
+                newYVel = -300
+            in zigzagEnemyUpdater x y newXVel newYVel 0
+        else if shipToSpawn < 90 then 
+            let x = 0
+                y = xStart
+            in sineEnemyCreate x y
+        else if shipToSpawn <= 100 then
+            let x = xStart
+                y = 0
+            in rushEnemyCreate x y
+        else []
+    in if exists > 0.1 then [] else newShip
+
+
 update : Msg -> Model -> (Model, Cmd Msg)
 update msg model = 
     case msg of
@@ -187,7 +258,11 @@ update msg model =
             ({model | keypress = (h, v)},  Cmd.none)
 
         Tick newTime ->
-            (checkEnemyCollisions (garbageCollectBullets (garbageCollectStars (updateBoardState newTime model))), (Random.generate StarCreate starPairGenerator))
+            (checkPlayerCollisions (checkEnemyCollisions (garbageCollectEnemies (garbageCollectBullets (garbageCollectStars (updateBoardState newTime model))))), 
+                Cmd.batch [
+                    (Random.generate StarCreate starPairGenerator)
+                    , (Random.generate EnemyCreate enemyPairGenerator)
+                ])
 
         FireBullet -> (playerFireBullet model , Cmd.none)
         
@@ -199,8 +274,34 @@ update msg model =
 
         StarCreate result ->
             ({model | background = List.append model.background (createNewStar result model)}, Cmd.none)
+
+        EnemyCreate result ->
+            ({model | enemies = List.append model.enemies (createNewEnemy result)}, Cmd.none)
         
         None -> (model, Cmd.none)
+
+checkPlayerCollisions : Model -> Model
+checkPlayerCollisions model =
+    let remainingEnemies 
+        = List.foldl (\(EnemyUpdater (ex, ey, color) efunc) currentAliveEnemies->
+                            let topCollision = 
+                                    if (distance (ex, ey - 20) (model.player.frontX, model.player.frontY)) <= player.frontR
+                                        then True
+                                        else False
+                                bottomCollision = 
+                                    if (distance (ex, ey- 20) (model.player.backX, model.player.backY)) <= player.backR
+                                        then True
+                                        else False
+                            in 
+                                if topCollision || bottomCollision 
+                                    then currentAliveEnemies
+                                    else (EnemyUpdater (ex, ey, color) efunc) :: currentAliveEnemies) [] model.enemies
+        player = model.player
+        newPlayer = 
+        if List.length remainingEnemies == List.length model.enemies 
+            then player
+            else {player | frontX = -1000, frontY = -1000, backX = -1000, backY = -1000}
+    in {model | enemies=remainingEnemies, player=newPlayer} 
 
 checkEnemyCollisions : Model -> Model
 checkEnemyCollisions model = 
@@ -216,8 +317,8 @@ recursivelyCheckEnemyCollisions aliveBullets aliveEnemies =
                 ([], aliveEnemies)
             Just (BUpdater (bx, by) bfunc) ->
                 let singleParseAliveEnemies = 
-                    (List.foldl (\(EnemyUpdater (ex, ey) efunc) currentAliveEnemies-> 
-                        if (distance (bx, by) (ex, ey - 20)) <= 15 then currentAliveEnemies else (EnemyUpdater (ex, ey) efunc) :: currentAliveEnemies
+                    (List.foldl (\(EnemyUpdater (ex, ey, color) efunc) currentAliveEnemies-> 
+                        if (distance (bx, by) (ex, ey - 20)) <= 15 then currentAliveEnemies else (EnemyUpdater (ex, ey, color) efunc) :: currentAliveEnemies
                     ) [] aliveEnemies)
                     bulletAlive = if List.length singleParseAliveEnemies == List.length aliveEnemies then [(BUpdater (bx, by) bfunc)] else []
                     remainingBullets = 
@@ -242,6 +343,12 @@ garbageCollectBullets model =
     let newBullets = List.foldl (\(BUpdater (x, y) func) currentList -> 
             if y > 750 || y < -100 || x > 1000 || x < -100 then currentList else (BUpdater (x,y) func) :: currentList) [] model.bullets
     in {model | bullets = newBullets}
+
+garbageCollectEnemies : Model -> Model
+garbageCollectEnemies model = 
+    let newEnemies = List.foldl (\(EnemyUpdater (x, y, color) func) currentList -> 
+            if y > 900 || y < -300 || x > 1200 || x < -300 then currentList else (EnemyUpdater (x,y, color) func) :: currentList) [] model.enemies
+    in {model | enemies = newEnemies}
 
 updateBoardState : Time -> Model -> Model
 updateBoardState newTime model =
@@ -331,14 +438,14 @@ drawBullet updater =
 drawEnemy : EnemyUpdater -> Svg Msg
 drawEnemy updater =
     case updater of 
-        EnemyUpdater (x, y) _ ->
+        EnemyUpdater (x, y, color) _ ->
             let (topX, topY) = (x,y)
                 (leftX, leftY) = (x - 20 , y - 40)
                 (rightX, rightY) = (x + 20, y - 40)
             in
                 polygon [ points (String.concat [(toString topX) , "," , (toString topY) , " " 
                     , (toString leftX) , "," , (toString leftY) , " " 
-                , (toString rightX) , "," , (toString rightY)]), fill "red"] []
+                , (toString rightX) , "," , (toString rightY)]), fill color] []
 
 ship : Ship -> List (Svg Msg)
 ship s =  
