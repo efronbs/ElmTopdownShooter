@@ -19,7 +19,9 @@ main =
         }
 
 -- MODEL
-type BUpdater = BUpdater (Float,Float) (Float ->List BUpdater)
+type BUpdater = BUpdater (Float,Float) (Float -> List BUpdater)
+
+type EnemyUpdater = EnemyUpdater (Float, Float) (Float -> List EnemyUpdater) 
 
 type alias Ship = {
     backX : Float 
@@ -42,6 +44,7 @@ type alias Model =
         , keypress : (HorizontalButtonState, VerticalButtonState)
         , oldTime : Maybe Time
         , bullets : List BUpdater
+        , enemies : List EnemyUpdater
     }
 
 init : (Model, Cmd Msg)
@@ -65,6 +68,7 @@ init =
             , keypress = (HNone, VNone)
             , oldTime = Nothing 
             , bullets = []
+            , enemies = stationaryEnemyUpdater 450 200 0
         }, Cmd.none )
 
 -- UPDATE
@@ -80,6 +84,12 @@ type BulletType
 type Msg = 
     None | Key HorizontalButtonState VerticalButtonState | Tick Time | FireBullet | SetBullet BulletType | StarCreate (Float, Float)
 
+distance : (Float, Float) -> (Float, Float) -> Float
+distance (x1, y1) (x2, y2) =
+    sqrt((y2 - y1)^2 + (x2 - x1)^2 )
+
+stationaryEnemyUpdater : Float -> Float -> Float -> List EnemyUpdater
+stationaryEnemyUpdater x y delta = [ EnemyUpdater (x, y) (stationaryEnemyUpdater x y) ]
 
 lineBulletUpdater : Float -> Float -> Float -> Float -> Float -> List BUpdater
 lineBulletUpdater x y vx vy delta =
@@ -142,6 +152,11 @@ updateBulletPos delta updater =
     case updater of
         BUpdater _ func -> func delta
 
+updateEnemyPos: Float -> EnemyUpdater -> List EnemyUpdater
+updateEnemyPos delta updater =
+    case updater of
+        EnemyUpdater _ func -> func delta
+
 playerFireBullet : Model -> Model
 playerFireBullet model = 
     let bulletStartY = (model.player.frontY + 3 - model.player.frontR)
@@ -172,7 +187,7 @@ update msg model =
             ({model | keypress = (h, v)},  Cmd.none)
 
         Tick newTime ->
-            (updateBoardState newTime model, (Random.generate StarCreate starPairGenerator))
+            (checkEnemyCollisions (garbageCollectBullets (garbageCollectStars (updateBoardState newTime model))), (Random.generate StarCreate starPairGenerator))
 
         FireBullet -> (playerFireBullet model , Cmd.none)
         
@@ -187,8 +202,46 @@ update msg model =
         
         None -> (model, Cmd.none)
 
+checkEnemyCollisions : Model -> Model
+checkEnemyCollisions model = 
+    let (remainingBullets, remainingEnemies) = recursivelyCheckEnemyCollisions model.bullets model.enemies
+    in {model | enemies= Debug.log "remaining enemies: " remainingEnemies, bullets= Debug.log "remaining bullets: " remainingBullets}
+
+recursivelyCheckEnemyCollisions : List BUpdater -> List EnemyUpdater -> (List BUpdater, List EnemyUpdater)
+recursivelyCheckEnemyCollisions aliveBullets aliveEnemies =
+    let topBullet = List.head aliveBullets
+    in  case topBullet of
+            -- Base case
+            Nothing -> 
+                ([], aliveEnemies)
+            Just (BUpdater (bx, by) bfunc) ->
+                let singleParseAliveEnemies = 
+                    (List.foldl (\(EnemyUpdater (ex, ey) efunc) currentAliveEnemies-> 
+                        if (distance (bx, by) (ex, ey - 20)) <= 15 then currentAliveEnemies else (EnemyUpdater (ex, ey) efunc) :: currentAliveEnemies
+                    ) [] aliveEnemies)
+                    bulletAlive = if List.length singleParseAliveEnemies == List.length aliveEnemies then [(BUpdater (bx, by) bfunc)] else []
+                    remainingBullets = 
+                        let
+                            tailBullets = List.tail aliveBullets
+                        in 
+                            case tailBullets of
+                                Nothing -> []
+                                Just tailBullets -> tailBullets
+                    (upBullets, upEnemies) = (recursivelyCheckEnemyCollisions remainingBullets singleParseAliveEnemies)
+                in (List.append bulletAlive upBullets, upEnemies)
+
+
 garbageCollectStars : Model -> Model
 garbageCollectStars model = 
+    let newBackground = List.foldl (\(x, y, rad) currentList -> 
+            if y > 1000 then currentList else (x, y, rad) :: currentList) [] model.background
+    in {model | background = newBackground}
+
+garbageCollectBullets : Model -> Model
+garbageCollectBullets model = 
+    let newBullets = List.foldl (\(BUpdater (x, y) func) currentList -> 
+            if y > 750 || y < -100 || x > 1000 || x < -100 then currentList else (BUpdater (x,y) func) :: currentList) [] model.bullets
+    in {model | bullets = newBullets}
 
 updateBoardState : Time -> Model -> Model
 updateBoardState newTime model =
@@ -196,12 +249,14 @@ updateBoardState newTime model =
         Just oldTime ->
             let newBullets = List.concat (List.map (\updater -> updateBulletPos (newTime - oldTime) updater) model.bullets)
                 newPlayer = (updatePlayerLocation (updatePlayerVelocity model) (newTime - oldTime) )
+                newEnemies = List.concat (List.map (\updater -> updateEnemyPos (newTime - oldTime) updater) model.enemies)
                 newBackground = List.map (\(x, y, rad) -> (x, y + 10, rad)) model.background
             in
                 {model | oldTime = Just newTime
                     , player = newPlayer
                     , bullets = newBullets
                     , background = newBackground
+                    , enemies = newEnemies
                     }
         Nothing -> 
             {model | oldTime = Just newTime}
@@ -209,7 +264,8 @@ updateBoardState newTime model =
 wallCheck : (HorizontalButtonState, VerticalButtonState) -> Model -> (Float, Float)
 wallCheck (h, v) model =
     -- still fall off right side - no idea why
-    let newBaseXVel = if (Debug.log "current x: " model.player.backX >= 900 && Debug.log "direction " h == Right) || (model.player.backX <= 0 && h == Left) then 0 else model.player.baseVelocityX
+    -- let newBaseXVel = if (Debug.log "current x: " model.player.backX >= 900 && Debug.log "direction " h == Right) || (model.player.backX <= 0 && h == Left) then 0 else model.player.baseVelocityX
+    let newBaseXVel = if (model.player.backX >= 900 && h == Right) || (model.player.backX <= 0 && h == Left) then 0 else model.player.baseVelocityX
         newBaseYVel = if (model.player.frontY <= 0 && v == Up) || (model.player.backY >= 650 && v == Down) then 0 else model.player.baseVelocityY
     in (newBaseXVel, newBaseYVel)
 
@@ -255,6 +311,7 @@ view model =
                 [
                     drawBackground model
                     , (ship model.player)
+                    , List.map (\enemy -> drawEnemy enemy) model.enemies
                     , List.map (\updater -> drawBullet updater) model.bullets
                 ]
             )
@@ -266,17 +323,28 @@ drawBackground model =
         (rect [x "0", y "0", width "900px", height "650px", fill "black"] [])
             :: List.map (\(x, y, radius) -> circle [ cx (toString x), cy (toString y), r (toString radius), fill "white"] []) model.background
 
-
 drawBullet: BUpdater -> Svg Msg
 drawBullet updater =
  case updater of
    BUpdater (x,y) _ -> circle [ cx (toString x), cy (toString y), r "5", fill "#0B79CE" ] []
 
+drawEnemy : EnemyUpdater -> Svg Msg
+drawEnemy updater =
+    case updater of 
+        EnemyUpdater (x, y) _ ->
+            let (topX, topY) = (x,y)
+                (leftX, leftY) = (x - 20 , y - 40)
+                (rightX, rightY) = (x + 20, y - 40)
+            in
+                polygon [ points (String.concat [(toString topX) , "," , (toString topY) , " " 
+                    , (toString leftX) , "," , (toString leftY) , " " 
+                , (toString rightX) , "," , (toString rightY)]), fill "red"] []
+
 ship : Ship -> List (Svg Msg)
 ship s =  
     [
-        circle [cx (toString s.backX), cy (toString s.backY), r (toString s.backR), fill "red"] []
-       , circle [cx (toString s.frontX), cy (toString s.frontY), r (toString s.frontR), fill "red"] []
+        circle [cx (toString s.backX), cy (toString s.backY), r (toString s.backR), fill "green"] []
+       , circle [cx (toString s.frontX), cy (toString s.frontY), r (toString s.frontR), fill "green"] []
     ]
 
 -- SUBSCRIPTIONS

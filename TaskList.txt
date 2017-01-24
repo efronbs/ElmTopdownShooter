@@ -24,17 +24,19 @@ Playing Field:
 [X] ship collides with board edges and won't move off too far screen
 [X] put background on play area
 [X] make background scroll
-[] bullets that are too far offscreen die
+[X] bullets & stars that are too far offscreen die
 
 Enemy Ships:
-[] add 1 enemy ship that is stationary but appears
-[] make enemy ship shoot bullets
+[X] add 1 enemy ship that is stationary but appears
+[] Shooting the enemy ship causes it to disapear
+[] touching the enemy ship causes your ship to disapear
 [] make that enemy ship move
 [] make enemy ships scroll into playing area
 [] all enemy ships appear onto screen, move in their pattern, shoot bullets, and disapear off screen 
 
-Collisions:
-[] player ship can never move too far off screen
-[] 
+QOL
+[] enemy direction
+[] fire limit
+[] control fixes
 
 
